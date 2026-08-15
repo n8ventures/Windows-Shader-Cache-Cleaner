@@ -18,9 +18,18 @@ title GPU Shader Cache Cleanup Utility
 ::   clean-gpu-shaders.bat /LIST      -> just list detected caches and sizes
 ::   clean-gpu-shaders.bat /HELP      -> show this usage text
 ::   clean-gpu-shaders.bat /LOG:path  -> write log to a custom path
+::   clean-gpu-shaders.bat /ADDSTEAMPATH:path
+::                                     -> remember an extra Steam library's
+::                                        shadercache folder (secondary
+::                                        drive, non-default library, etc.)
 ::
 :: In the interactive menu, leaving your answer blank runs the DEFAULT
 :: preset (everything except Steam).
+::
+:: Steam's main library path is auto-detected from the registry. Extra
+:: libraries aren't auto-detected (Steam's libraryfolders.vdf isn't
+:: reliable to parse in batch) - add them once with /ADDSTEAMPATH:path
+:: and they're remembered in steam_custom_paths.txt next to this script.
 :: =====================================================================
 
 set "SCRIPT_DIR=%~dp0"
@@ -42,6 +51,15 @@ if /I "%ARG%"=="/INTEL"    set "MODE=PRESET" & set "PRESET_NAME=INTEL"   & shift
 if /I "%ARG%"=="/STEAM"    set "MODE=PRESET" & set "PRESET_NAME=STEAM"   & shift & goto ParseArgs
 if /I "%ARG%"=="/LIST"     set "MODE=LIST" & shift & goto ParseArgs
 if /I "%ARG%"=="/HELP"     goto ShowHelp
+if /I "%ARG:~0,14%"=="/ADDSTEAMPATH:" (
+    set "STEAM_CUSTOM_FILE=%SCRIPT_DIR%steam_custom_paths.txt"
+    echo %ARG:~14%>> "!STEAM_CUSTOM_FILE!"
+    echo Added to !STEAM_CUSTOM_FILE!:
+    echo   %ARG:~14%
+    echo Re-run without /ADDSTEAMPATH to use it.
+    pause
+    exit /b 0
+)
 if /I "%ARG:~0,8%"=="/PRESET:" (
     set "MODE=PRESET"
     set "PRESET_NAME=%ARG:~8%"
@@ -107,7 +125,7 @@ call :AddCache "%LOCALAPPDATA%\NVIDIA App\VkCache"                     "NVIDIA A
 
 call :AddCache "%LOCALAPPDATA%\Intel\ShaderCache"                      "Intel Shader Cache"                     INTEL
 
-call :AddCache "%PROGRAMFILES(X86)%\Steam\steamapps\shadercache"       "Steam Shader Cache (default library)"   STEAM
+call :AddSteamCaches
 
 :: ---- Dispatch by mode -----------------------------------------------------
 if /I "%MODE%"=="LIST"   goto DoList
@@ -228,6 +246,41 @@ set /a CACHE_COUNT+=1
 set "CACHE_PATH_%CACHE_COUNT%=%~1"
 set "CACHE_NAME_%CACHE_COUNT%=%~2"
 set "CACHE_VENDOR_%CACHE_COUNT%=%~3"
+exit /b
+
+:: Steam's shadercache folder isn't always at the default
+:: Program Files (x86) path (custom install drive, secondary library,
+:: etc.), so this tries the registry first and falls back to the
+:: hardcoded default. It also reads steam_custom_paths.txt (next to
+:: this script, one shadercache folder per line, # or ; for comments)
+:: so you can add secondary Steam libraries by hand or via
+:: /ADDSTEAMPATH:<path>. NOTE: this does not auto-parse
+:: libraryfolders.vdf for additional libraries - batch VDF parsing is
+:: fragile enough that it's not worth trusting for a delete operation;
+:: use the custom paths file for extra libraries instead.
+:AddSteamCaches
+set "STEAM_INSTALL="
+for /f "usebackq tokens=2,*" %%A in (`reg query "HKCU\Software\Valve\Steam" /v SteamPath 2^>nul`) do set "STEAM_INSTALL=%%B"
+if not defined STEAM_INSTALL (
+    for /f "usebackq tokens=3,*" %%A in (`reg query "HKLM\SOFTWARE\WOW6432Node\Valve\Steam" /v InstallPath 2^>nul`) do set "STEAM_INSTALL=%%B"
+)
+if not defined STEAM_INSTALL set "STEAM_INSTALL=%PROGRAMFILES(X86)%\Steam"
+set "STEAM_INSTALL=%STEAM_INSTALL:/=\%"
+
+call :AddCache "%STEAM_INSTALL%\steamapps\shadercache" "Steam Shader Cache (main library)" STEAM
+
+set "STEAM_CUSTOM_FILE=%SCRIPT_DIR%steam_custom_paths.txt"
+if exist "%STEAM_CUSTOM_FILE%" (
+    set /a STEAM_EXTRA_N=0
+    for /f "usebackq eol=# delims=" %%L in ("%STEAM_CUSTOM_FILE%") do (
+        set "line=%%L"
+        set "firstchar=!line:~0,1!"
+        if not "!line!"=="" if not "!firstchar!"==";" (
+            set /a STEAM_EXTRA_N+=1
+            call :AddCache "!line!" "Steam Shader Cache (custom path !STEAM_EXTRA_N!)" STEAM
+        )
+    )
+)
 exit /b
 
 :InitLog
@@ -391,10 +444,16 @@ echo   %~nx0 /STEAM     Clear Steam shader cache only
 echo   %~nx0 /PRESET:x  Same as the flags above, e.g. /PRESET:AMD
 echo   %~nx0 /LIST      List detected caches and their sizes, clear nothing
 echo   %~nx0 /LOG:path  Write the log file to a custom path
+echo   %~nx0 /ADDSTEAMPATH:path
+echo                    Remember an extra Steam library's shadercache folder
 echo   %~nx0 /HELP      Show this help text
 echo.
 echo In the interactive menu, pressing Enter with no input runs the
 echo DEFAULT preset (everything except Steam).
+echo.
+echo Steam's main library is auto-detected from the registry. Extra
+echo libraries are read from steam_custom_paths.txt next to this script -
+echo add one with /ADDSTEAMPATH:path.
 echo.
 pause
 exit /b
