@@ -104,6 +104,7 @@ if %errorlevel%==0 set "HAVE_HANDLE=1"
 :: 3rd argument is the vendor tag used by the bundle presets below:
 ::   WIN | AMD | NVIDIA | INTEL | STEAM
 set /a CACHE_COUNT=0
+set "KNOWN_PATHS=;"
 
 call :AddCache "%LOCALAPPDATA%\D3DSCache"                              "Windows DirectX Shader Cache"          WIN
 call :AddCache "%LOCALAPPDATA%\Temp\DXCache"                           "DX12 Pipeline Cache"                   WIN
@@ -111,6 +112,7 @@ call :AddCache "%LOCALAPPDATA%\Microsoft\DirectX Shader Cache"         "Windows 
 call :AddCache "%LOCALAPPDATA%\Temp\D3DCache"                          "Direct3D Pipeline Cache"                WIN
 
 call :AddCache "%LOCALAPPDATA%\AMD\DXCache"                            "AMD DX Cache"                           AMD
+call :AddCache "%LOCALAPPDATA%\AMD\DxcCache"                           "AMD DirectX Shader Compiler Cache"      AMD
 call :AddCache "%LOCALAPPDATA%\AMD\GLCache"                            "AMD OpenGL Cache"                       AMD
 call :AddCache "%LOCALAPPDATA%\AMD\VkCache"                            "AMD Vulkan Cache"                       AMD
 
@@ -141,6 +143,7 @@ echo ==========================================
 for /L %%i in (1,1,%CACHE_COUNT%) do (
     call :ReportOne %%i
 )
+call :ScanUntracked
 echo.
 pause
 exit /b
@@ -246,6 +249,44 @@ set /a CACHE_COUNT+=1
 set "CACHE_PATH_%CACHE_COUNT%=%~1"
 set "CACHE_NAME_%CACHE_COUNT%=%~2"
 set "CACHE_VENDOR_%CACHE_COUNT%=%~3"
+set "KNOWN_PATHS=!KNOWN_PATHS!%~1;"
+exit /b
+
+:: Flags any folder sitting next to the ones we track that ISN'T in our
+:: list - e.g. a vendor adding a new cache folder name in a driver
+:: update, the way AMD's "DxcCache" (DirectX Shader Compiler cache,
+:: distinct from the older "DxCache") went untracked for a while here.
+:: Doesn't touch anything, just reports it so it doesn't go unnoticed.
+:ScanUntracked
+echo.
+echo ==========================================
+echo  Checking for untracked cache folders
+echo ==========================================
+set "_found_untracked=0"
+call :CheckVendorRoot "%LOCALAPPDATA%\AMD"
+call :CheckVendorRoot "%LOCALAPPDATA%\NVIDIA"
+call :CheckVendorRoot "%LOCALAPPDATA%\NVIDIA App"
+call :CheckVendorRoot "%LOCALAPPDATA%\Intel"
+if "%_found_untracked%"=="0" (
+    echo   None found - every folder under known vendor roots is tracked.
+)
+exit /b
+
+:: %1 = a vendor root folder (e.g. %LOCALAPPDATA%\AMD) to check the
+:: immediate subfolders of against KNOWN_PATHS.
+:CheckVendorRoot
+set "root=%~1"
+if not exist "%root%" exit /b
+for /d %%D in ("%root%\*") do (
+    echo !KNOWN_PATHS!| findstr /I /C:"%%~D;" >nul
+    if errorlevel 1 (
+        set "_found_untracked=1"
+        call :GetFolderSize "%%D" _untracked_sz
+        call :HumanSize !_untracked_sz! _untracked_disp
+        echo   [UNTRACKED] %%D  ^(!_untracked_disp!^)
+        echo   [UNTRACKED] %%D  ^(!_untracked_disp!^) - not managed by this script >> "%LOGFILE%"
+    )
+)
 exit /b
 
 :: Steam's shadercache folder isn't always at the default
@@ -426,6 +467,7 @@ echo ==========================================
 echo.
 echo Cleanup complete - freed !TOTALDISPLAY! >> "%LOGFILE%"
 echo. >> "%LOGFILE%"
+call :ScanUntracked
 pause
 exit /b
 
