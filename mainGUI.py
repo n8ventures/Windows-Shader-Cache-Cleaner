@@ -73,10 +73,10 @@ PRESET_BUTTONS = [
     ("Default (no Steam)", "__DEFAULT__"),
     ("All", "__ALL__"),
     ("None", "__NONE__"),
-    ("Windows", "WIN"),
+    ("Intel", "INTEL"),
     ("AMD", "AMD"),
     ("NVIDIA", "NVIDIA"),
-    ("Intel", "INTEL"),
+    ("Windows", "WIN"),
     ("Steam", "STEAM"),
 ]
 
@@ -90,12 +90,257 @@ PRESET_STYLE = {
     "INTEL": {"fg_color": "#0071C5", "hover_color": "#00457C", "text_color": "white"},
     "STEAM": {"fg_color": "#1B2838", "hover_color": "#0B0F14", "text_color": "white"},
 }
+QUEUE_POLL_MS = 16
+WHEEL_UNITS_PER_NOTCH = 10
+
+
+class SmoothScrollableFrame(ctk.CTkScrollableFrame):
+    def __init__(self, *args, **kwargs):
+        self._wheel_unit_remainder = 0.0
+        super().__init__(*args, **kwargs)
+
+    def _mouse_wheel_all(self, event):
+        if not sys.platform.startswith("win"):
+            return super()._mouse_wheel_all(event)
+        if not self._check_if_valid_scroll(event.widget):
+            return
+
+        horizontal = self._shift_pressed
+        view = self._parent_canvas.xview() if horizontal else self._parent_canvas.yview()
+        if view == (0.0, 1.0):
+            return
+
+        self._wheel_unit_remainder += -(event.delta / 120) * WHEEL_UNITS_PER_NOTCH
+        scroll_units = int(self._wheel_unit_remainder)
+        if scroll_units == 0:
+            return
+        self._wheel_unit_remainder -= scroll_units
+
+        if horizontal:
+            self._parent_canvas.xview("scroll", scroll_units, "units")
+        else:
+            self._parent_canvas.yview("scroll", scroll_units, "units")
+
+
+class CacheListCanvas(ctk.CTkFrame):
+    def __init__(self, master, on_toggle):
+        super().__init__(master)
+        self._on_toggle = on_toggle
+        self._entries = []
+        self._check_vars = {}
+        self._row_items = {}
+        self._wheel_unit_remainder = 0.0
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(self, text="Detected caches", anchor="w", font=("", 12)).grid(
+            row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 5)
+        )
+        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
+        self.canvas.grid(row=1, column=0, sticky="nsew", padx=(3, 0), pady=(0, 3))
+        scrollbar = ctk.CTkScrollbar(self, command=self.canvas.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 3), pady=(0, 3))
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        self.canvas.bind("<Configure>", self._render)
+        self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self._render()
+
+    @staticmethod
+    def _mode_color(color):
+        if isinstance(color, (tuple, list)):
+            return color[0] if ctk.get_appearance_mode() == "Light" else color[1]
+        return color
+
+    def set_entries(self, entries, check_vars):
+        self._entries = entries
+        self._check_vars = check_vars
+        self._render()
+
+    def refresh_theme(self):
+        self._render()
+
+    def refresh_checks(self):
+        checkbox_theme = ctk.ThemeManager.theme["CTkCheckBox"]
+        background = self._mode_color(ctk.ThemeManager.theme["CTkFrame"]["fg_color"])
+        accent = self._mode_color(checkbox_theme["fg_color"])
+        border = self._mode_color(checkbox_theme["border_color"])
+        checkmark = self._mode_color(checkbox_theme["checkmark_color"])
+        for entry in self._entries:
+            items = self._row_items.get(id(entry))
+            if not items:
+                continue
+            selected = self._check_vars[id(entry)].get()
+            self.canvas.itemconfigure(items["box"], fill=accent if selected else background, outline=border)
+            self.canvas.itemconfigure(items["check"], fill=checkmark, state="normal" if selected else "hidden")
+
+    def update_entry(self, entry):
+        items = self._row_items.get(id(entry))
+        if not items:
+            return
+        self.canvas.itemconfigure(
+            items["status"],
+            text=STATUS_LABEL.get(entry.status, entry.status),
+            fill=self._mode_color(STATUS_COLOR.get(entry.status, ("gray50", "gray50"))),
+        )
+        if entry.size_bytes is not None:
+            self.canvas.itemconfigure(
+                items["size"], text=core.human_size(entry.size_bytes) if entry.size_bytes else "—"
+            )
+
+    def _render(self, _event=None):
+        if not hasattr(self, "canvas"):
+            return
+        frame_theme = ctk.ThemeManager.theme["CTkFrame"]
+        checkbox_theme = ctk.ThemeManager.theme["CTkCheckBox"]
+        background = self._mode_color(frame_theme["fg_color"])
+        text_color = self._mode_color(checkbox_theme["text_color"])
+        muted_color = "#808080"
+        checkbox_border = self._mode_color(checkbox_theme["border_color"])
+        accent = self._mode_color(checkbox_theme["fg_color"])
+        checkmark_color = self._mode_color(checkbox_theme["checkmark_color"])
+        self.canvas.configure(bg=background)
+        self.canvas.delete("all")
+        self._row_items.clear()
+
+        width = max(self.canvas.winfo_width(), 1)
+        y = 6
+        for vendor in core.VENDORS:
+            vendor_entries = [entry for entry in self._entries if entry.vendor == vendor]
+            if not vendor_entries:
+                continue
+            self.canvas.create_text(
+                10,
+                y,
+                text=core.VENDOR_LABELS[vendor],
+                fill=muted_color,
+                font=("", 12, "bold"),
+                anchor="nw",
+            )
+            y += 23
+            for entry in vendor_entries:
+                top = y
+                box = self.canvas.create_rectangle(
+                    12, y + 5, 29, y + 22, fill=background, outline=checkbox_border, width=2
+                )
+                check = self.canvas.create_line(
+                    (15, y + 13, 19, y + 17, 26, y + 9),
+                    fill=checkmark_color,
+                    width=2,
+                    state="hidden",
+                )
+                self.canvas.create_text(38, y + 4, text=entry.name, fill=text_color, font=("", 11), anchor="nw")
+                size = self.canvas.create_text(
+                    width - 91,
+                    y + 4,
+                    text=core.human_size(entry.size_bytes) if entry.size_bytes else "—",
+                    fill=muted_color,
+                    font=("", 11),
+                    anchor="ne",
+                )
+                status = self.canvas.create_text(
+                    width - 9,
+                    y + 4,
+                    text=STATUS_LABEL.get(entry.status, entry.status),
+                    fill=self._mode_color(STATUS_COLOR.get(entry.status, ("gray50", "gray50"))),
+                    font=("", 11),
+                    anchor="ne",
+                )
+                self._row_items[id(entry)] = {
+                    "top": top,
+                    "bottom": top + 28,
+                    "box": box,
+                    "check": check,
+                    "size": size,
+                    "status": status,
+                }
+                y += 28
+
+        self.canvas.configure(scrollregion=(0, 0, width, y + 4))
+        self.refresh_checks()
+
+    def _on_click(self, event):
+        y = self.canvas.canvasy(event.y)
+        x = self.canvas.canvasx(event.x)
+        name_right = self.canvas.winfo_width() - 185
+        for entry in self._entries:
+            items = self._row_items.get(id(entry))
+            if items and items["top"] <= y < items["bottom"] and 8 <= x < name_right:
+                var = self._check_vars[id(entry)]
+                var.set(not var.get())
+                self._on_toggle()
+                return "break"
+
+    def _on_mousewheel(self, event):
+        if self.canvas.yview() != (0.0, 1.0):
+            self._wheel_unit_remainder += -(event.delta / 120) * WHEEL_UNITS_PER_NOTCH
+            units = int(self._wheel_unit_remainder)
+            if units:
+                self._wheel_unit_remainder -= units
+                self.canvas.yview_scroll(units, "units")
+        return "break"
+
+
+class UntrackedListCanvas(ctk.CTkFrame):
+    def __init__(self, master, height):
+        super().__init__(master, height=height, fg_color="transparent")
+        self.grid_propagate(False)
+        self._items = []
+        self._wheel_unit_remainder = 0.0
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ctk.CTkScrollbar(self, command=self.canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 3))
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        self.canvas.bind("<Configure>", self._render)
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self._render()
+
+    @staticmethod
+    def _mode_color(color):
+        if isinstance(color, (tuple, list)):
+            return color[0] if ctk.get_appearance_mode() == "Light" else color[1]
+        return color
+
+    def set_items(self, items):
+        self._items = items
+        self._render()
+
+    def refresh_theme(self):
+        self._render()
+
+    def _render(self, _event=None):
+        if not hasattr(self, "canvas"):
+            return
+        background = self._mode_color(ctk.ThemeManager.theme["CTk"]["fg_color"])
+        self.canvas.configure(bg=background)
+        self.canvas.delete("all")
+        width = max(self.canvas.winfo_width(), 1)
+        y = 3
+        for text in self._items:
+            self.canvas.create_text(3, y, text=text, fill="#8c8c8c", font=("", 10), anchor="nw")
+            y += 19
+        self.canvas.configure(scrollregion=(0, 0, width, y + 3))
+
+    def _on_mousewheel(self, event):
+        if self.canvas.yview() != (0.0, 1.0):
+            self._wheel_unit_remainder += -(event.delta / 120) * WHEEL_UNITS_PER_NOTCH
+            units = int(self._wheel_unit_remainder)
+            if units:
+                self._wheel_unit_remainder -= units
+                self.canvas.yview_scroll(units, "units")
+        return "break"
 
 
 # --------------------------------------------------------------------------
 # Popups
 # --------------------------------------------------------------------------
 class ProgressPopup(ctk.CTkToplevel):
+    _deactivate_windows_window_header_manipulation = True
+
     def __init__(self, master, total, title="Working…"):
         super().__init__(master)
         width, height = 420, 150
@@ -118,7 +363,34 @@ class ProgressPopup(ctk.CTkToplevel):
         self.progress.set(0)
         self.progress.pack(pady=(0, 10))
 
+    def destroy(self):
+        if self.winfo_exists():
+            try:
+                self.grab_release()
+            except tk.TclError:
+                pass
+        try:
+            super().destroy()
+        except tk.TclError:
+            pass
+
+    def deiconify(self):
+        if self.winfo_exists():
+            try:
+                super().deiconify()
+            except tk.TclError:
+                pass
+
+    def focus_set(self):
+        if self.winfo_exists():
+            try:
+                super().focus_set()
+            except tk.TclError:
+                pass
+
     def update_progress(self, index, detail):
+        if not self.winfo_exists():
+            return
         max_length = 45
         if len(detail) > max_length:
             detail = detail[: max_length - 3] + "..."
@@ -140,6 +412,10 @@ class ManageSteamPathsPopup(ctk.CTkToplevel):
         self.grab_set()
         set_icon(self)
 
+        # Some CustomTkinter callbacks still fire after the popup is closed,
+        # so guard the window lifecycle as a safety net.
+        self._is_dead = False
+
         ctk.CTkLabel(
             self,
             text="Extra Steam library 'shadercache' folders, for libraries the\n"
@@ -149,7 +425,7 @@ class ManageSteamPathsPopup(ctk.CTkToplevel):
             wraplength=440,
         ).pack(anchor="w", padx=16, pady=(16, 8))
 
-        self.list_frame = ctk.CTkScrollableFrame(self, height=180)
+        self.list_frame = SmoothScrollableFrame(self, height=180)
         self.list_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
         add_row = ctk.CTkFrame(self, fg_color="transparent")
@@ -160,6 +436,32 @@ class ManageSteamPathsPopup(ctk.CTkToplevel):
         ctk.CTkButton(add_row, text="Add", width=70, command=self._add).pack(side="left")
 
         self._refresh()
+
+    def destroy(self):
+        self._is_dead = True
+        if self.winfo_exists():
+            try:
+                self.grab_release()
+            except tk.TclError:
+                pass
+        try:
+            super().destroy()
+        except tk.TclError:
+            pass
+
+    def deiconify(self):
+        if not self._is_dead and self.winfo_exists():
+            try:
+                super().deiconify()
+            except tk.TclError:
+                pass
+
+    def focus_set(self):
+        if not self._is_dead and self.winfo_exists():
+            try:
+                super().focus_set()
+            except tk.TclError:
+                pass
 
     def _refresh(self):
         for widget in self.list_frame.winfo_children():
@@ -216,17 +518,19 @@ class App(ctk.CTk):
         x, y = (sw - width) // 2, (sh - height) // 2
         self.title(APP_NAME)
         self.geometry(f"{width}x{height}+{x}+{y - 35}")
-        self.minsize(520, 600)
+        self.resizable(False, False)
         set_icon(self)
         self.update_idletasks()
 
         self.entries = []
-        self.row_widgets = {}  # id(entry) -> {"size": label, "status": label}
         self.check_vars = {}  # id(entry) -> BooleanVar
 
         self._build_ui()
         self._reload_entries()
-        self.after(100, self.deiconify)
+        self.attributes("-alpha", 0.0)
+        self.deiconify()
+        self._flush_pending_redraws()
+        self.attributes("-alpha", 1.0)
 
     # ---- UI construction ---------------------------------------------------
     def _build_ui(self):
@@ -295,12 +599,15 @@ class App(ctk.CTk):
             ).grid(row=row, column=col, padx=4, pady=4, sticky="ew")
 
         # --- Cache list ---
-        self.list_frame = ctk.CTkScrollableFrame(self, label_text="Detected caches")
+        self.list_frame = CacheListCanvas(self, on_toggle=self._update_status_label)
         self.list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 6))
 
-        # --- Untracked folders warning (populated after a scan) ---
-        self.untracked_frame = ctk.CTkFrame(self, fg_color="transparent", border_width=0)
-        # not packed until there's something to show — see _refresh_untracked
+        # --- Untracked folders warning (fixed-height placeholder keeps the
+        # window geometry stable so the action buttons and watermark do not
+        # jump when the audit panel appears or disappears). ---
+        self.untracked_frame = ctk.CTkFrame(self, fg_color="transparent", border_width=0, height=130)
+        self.untracked_frame.pack(fill="x", padx=20, pady=(0, 10))
+        self.untracked_canvas = None
 
         self._steam_paths_btn = ctk.CTkButton(
             self,
@@ -314,23 +621,32 @@ class App(ctk.CTk):
         # --- Actions ---
         action_row = ctk.CTkFrame(self, fg_color="transparent", border_width=0)
         action_row.pack(fill="x", padx=20, pady=(0, 6))
-        self.scan_btn = ctk.CTkButton(action_row, text="Scan", height=38, command=self._start_scan)
-        self.scan_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        action_row.grid_columnconfigure(0, weight=1, uniform="action_buttons")
+        action_row.grid_columnconfigure(1, weight=1, uniform="action_buttons")
+        self.scan_btn = ctk.CTkButton(
+            action_row,
+            text="Scan",
+            height=38,
+            command=self._start_scan,
+            fg_color="#55B5FF",
+            hover_color="#3B94D8",
+        )
+        self.scan_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.clear_btn = ctk.CTkButton(
             action_row,
-            text="Clear Selected",
+            text="Clear Selected Caches",
             height=38,
             font=("", 13, "bold"),
-            fg_color="#8b2e2e",
-            hover_color="#6e2424",
+            fg_color="#4dd42c",
+            hover_color="#45b828",
             command=self._start_clear,
         )
-        self.clear_btn.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        self.clear_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
         self.status_label = ctk.CTkLabel(self, text="Selected: 0 items", text_color="gray55", font=("", 11))
         self.status_label.pack(pady=(0, 6))
 
-        ctk.CTkLabel(self, text="by N8VENTURES", text_color="gray", font=("", 10)).pack(side="bottom", pady=6)
+        watermark_label(self, __version__)
 
     def _refresh_admin_row(self):
         if core.is_admin():
@@ -378,15 +694,7 @@ class App(ctk.CTk):
     def _toggle_appearance(self):
         new_mode = "Light" if ctk.get_appearance_mode() == "Dark" else "Dark"
 
-        def _swap_and_reveal():
-            # Withdraw rather than just staying at alpha=0 — set_appearance_mode
-            # below has to restyle every live widget, and that's the actual
-            # source of the pause. With the window merely transparent-but-
-            # mapped, the OS keeps compositing it the whole time and the
-            # stall bleeds into the reveal. Fully withdrawing (same trick
-            # __init__ already uses during startup) means there's nothing on
-            # screen to composite while the restyle runs.
-            self.withdraw()
+        def apply_theme_and_fade_in():
             ctk.set_appearance_mode(new_mode)
             set_setting("appearance_mode", new_mode)
             apply_emoji(
@@ -394,68 +702,34 @@ class App(ctk.CTk):
                 emoji_char="☀️" if new_mode == "Dark" else "🌑",
                 px=15,
             )
+            self.list_frame.refresh_theme()
+            if self.untracked_canvas is not None:
+                self.untracked_canvas.refresh_theme()
             self._flush_pending_redraws()
-            self.attributes("-alpha", 0.0)
-            self.deiconify()
-            animate_alpha(self, 1.0, duration_ms=250)
+            animate_alpha(self, 1.0, 200)
 
-        animate_alpha(self, 0.0, duration_ms=150, on_complete=_swap_and_reveal)
+        # Fade out the current appearance first. Change the theme only once the
+        # window is fully transparent, then fade the complete restyled window in.
+        animate_alpha(self, 0.0, 200, on_complete=apply_theme_and_fade_in)
 
     # ---- Cache list rendering ------------------------------------------------
     def _reload_entries(self):
         self.entries = core.build_cache_list()
-        for widget in self.list_frame.winfo_children():
-            widget.destroy()
-        self.row_widgets = {}
-        self.check_vars = {}
-
-        for vendor in core.VENDORS:
-            vendor_entries = [e for e in self.entries if e.vendor == vendor]
-            if not vendor_entries:
-                continue
-            ctk.CTkLabel(
-                self.list_frame,
-                text=core.VENDOR_LABELS[vendor],
-                font=("", 12, "bold"),
-                text_color="gray50",
-            ).pack(anchor="w", pady=(8, 2))
-            for entry in vendor_entries:
-                self._add_row(entry)
+        self.check_vars = {id(entry): tk.BooleanVar(value=False) for entry in self.entries}
+        self.list_frame.set_entries(self.entries, self.check_vars)
+        self.list_frame.canvas.yview_moveto(0)
         self._update_status_label()
 
-    def _add_row(self, entry):
-        row = ctk.CTkFrame(self.list_frame, fg_color="transparent", border_width=0)
-        row.pack(fill="x", pady=2)
-
-        var = tk.BooleanVar(value=False)
-        self.check_vars[id(entry)] = var
-        ctk.CTkCheckBox(row, text=entry.name, variable=var, command=self._update_status_label).pack(side="left")
-
-        size_label = ctk.CTkLabel(row, text="—", width=70, text_color="gray55", font=("", 11))
-        size_label.pack(side="right", padx=(6, 0))
-        status_label = ctk.CTkLabel(row, text=STATUS_LABEL["unknown"], width=80, font=("", 11))
-        status_label.pack(side="right")
-
-        self.row_widgets[id(entry)] = {"size": size_label, "status": status_label}
-
     def _set_row_status(self, entry):
-        widgets = self.row_widgets.get(id(entry))
-        if not widgets:
-            return
-        widgets["status"].configure(
-            text=STATUS_LABEL.get(entry.status, entry.status),
-            text_color=STATUS_COLOR.get(entry.status, ("gray50", "gray50")),
-        )
-        if entry.size_bytes is not None:
-            widgets["size"].configure(text=core.human_size(entry.size_bytes) if entry.size_bytes else "—")
+        self.list_frame.update_entry(entry)
 
     # ---- Untracked-folder audit ------------------------------------------------
     def _refresh_untracked(self):
         for widget in self.untracked_frame.winfo_children():
             widget.destroy()
+        self.untracked_canvas = None
         found = core.find_untracked_siblings(self.entries)
         if not found:
-            self.untracked_frame.pack_forget()
             return
 
         ctk.CTkLabel(
@@ -467,24 +741,16 @@ class App(ctk.CTk):
             justify="left",
         ).pack(anchor="w", pady=(4, 2))
 
-        # Fixed-height scrollable body — a long list here used to push the
-        # window taller with no way back short of a manual resize, since
-        # this frame sits below the (already-scrollable) cache list rather
-        # than inside it. Capped so it scrolls internally instead.
-        body = ctk.CTkScrollableFrame(self.untracked_frame, height=110, fg_color="transparent")
-        body.pack(fill="x", expand=False, pady=(0, 4))
-
+        # Keep the panel height fixed so the rest of the interface does not
+        # reflow when this audit list appears or disappears.
+        rows = []
         for item in found:
             size_txt = core.human_size(core.folder_size(item.path))
-            ctk.CTkLabel(
-                body,
-                text=f"{item.path}  ({size_txt})",
-                text_color="gray55",
-                font=("", 10),
-                anchor="w",
-            ).pack(anchor="w", fill="x")
+            rows.append(f"{item.path}  ({size_txt})")
             core.log_event(f"[UNTRACKED] {item.path} ({size_txt}) - not managed by this app")
-        self.untracked_frame.pack(fill="x", padx=20, pady=(0, 10), before=self._steam_paths_btn)
+        self.untracked_canvas = UntrackedListCanvas(self.untracked_frame, height=92)
+        self.untracked_canvas.pack(fill="x", expand=False, pady=(0, 4))
+        self.untracked_canvas.set_items(rows)
 
     # ---- Presets ---------------------------------------------------------------
     def _apply_preset(self, vendor):
@@ -503,6 +769,7 @@ class App(ctk.CTk):
         self._update_status_label()
 
     def _update_status_label(self):
+        self.list_frame.refresh_checks()
         selected = [e for e in self.entries if self.check_vars.get(id(e)) and self.check_vars[id(e)].get()]
         known_sizes = [e.size_bytes for e in selected if e.size_bytes is not None]
         if selected and len(known_sizes) == len(selected):
@@ -520,6 +787,7 @@ class App(ctk.CTk):
     def _start_scan(self):
         self.scan_btn.configure(state="disabled")
         self.clear_btn.configure(state="disabled")
+        self.update_idletasks()
         popup = ProgressPopup(self, len(self.entries), title="Scanning…")
         q = queue.Queue()
 
@@ -539,16 +807,17 @@ class App(ctk.CTk):
                     popup.update_progress(index, payload.name)
                     self._set_row_status(payload)
                 elif kind == "done":
-                    popup.destroy()
                     self.scan_btn.configure(state="normal")
                     self.clear_btn.configure(state="normal")
+                    self.update_idletasks()
+                    popup.destroy()
                     self._update_status_label()
                     self._refresh_untracked()
                     core.log_event(f"Scan complete - {len(self.entries)} caches checked")
                     return
         except queue.Empty:
             pass
-        self.after(80, self._poll_scan_queue, q, popup, index)
+        self.after(QUEUE_POLL_MS, self._poll_scan_queue, q, popup, index)
 
     # ---- Clear -------------------------------------------------------------
     def _start_clear(self):
@@ -565,6 +834,7 @@ class App(ctk.CTk):
 
         self.scan_btn.configure(state="disabled")
         self.clear_btn.configure(state="disabled")
+        self.update_idletasks()
         popup = ProgressPopup(self, len(selected), title="Clearing…")
         q = queue.Queue()
 
@@ -586,9 +856,10 @@ class App(ctk.CTk):
                     self._set_row_status(entry)
                 elif msg[0] == "done":
                     total = msg[1]
-                    popup.destroy()
                     self.scan_btn.configure(state="normal")
                     self.clear_btn.configure(state="normal")
+                    self.update_idletasks()
+                    popup.destroy()
                     self._update_status_label()
                     self._refresh_untracked()
                     core.log_event(f"Clear complete - freed {core.human_size(total)}")
@@ -596,7 +867,7 @@ class App(ctk.CTk):
                     return
         except queue.Empty:
             pass
-        self.after(80, self._poll_clear_queue, q, popup, index)
+        self.after(QUEUE_POLL_MS, self._poll_clear_queue, q, popup, index)
 
 
 def main():
