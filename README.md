@@ -1,16 +1,21 @@
-# N8's Shader Cache Cleaner (Python/CustomTkinter port)
+# N8's Shader Cache Cleaner
 
-Setup:
+Download:
+[Windows Portable](https://github.com/n8ventures/Windows-Shader-Cache-Cleaner/releases/latest/download/N8sShaderCacheCleaner.exe)
+
+or
+
+## Setup:
+
 pip install customtkinter
 
 Run:
 python mainGUI.py
 
-Files:
-mainGUI.py - the GUI (this is what you run)
-shader_cache_core.py - cache discovery, Steam auto-detection, scan/clear logic
+# Prefer CLI version?
 
-Windows only, same as the .bat this replaces.
+[Clean_Shaders.bat](https://github.com/n8ventures/Windows-Shader-Cache-Cleaner/blob/2fbc986557f55531fd7bfcae59f014a3847b45ed/Clean_Shaders.bat)
 
-Not wired up yet (would follow the same pattern as your other apps if
-you want them added): - App icon / **version**.py - modules/updater.py-style silent auto-updater - githubReleaseChecker.py-style update-check popup - PyInstaller build config
+<div>
+<img src="https://github.com/n8ventures/Windows-Shader-Cache-Cleaner/blob/418f83aa2226ac9138b6d2c6bc30eccbc3772d2c/docs/batscript.png" alt="Bat Script" width="200">
+</div>
