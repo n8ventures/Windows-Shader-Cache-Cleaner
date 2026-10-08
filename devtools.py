@@ -162,9 +162,9 @@ def run_pyinstaller(build_label: str) -> int:
 # ── Post-build ────────────────────────────────────────────────────────────────
 
 
-def post_build_summary(build_label: str, count: int, success: bool):
+def post_build_summary(build_label: str, count: int, success: bool, app_path: Path = None):
+    app_path = Path(app_path).resolve()
     print("\n" + "─" * 60)
-    app_path = DIST_DIR / f"{APP}{EXT}"
 
     if success:
         if app_path.is_dir():
@@ -187,6 +187,41 @@ def post_build_summary(build_label: str, count: int, success: bool):
 
 
 # ── Post-build signing ────────────────────────────────────────────────────────
+def sign_executable(exe_path: Path):
+    exe_path = Path(exe_path).resolve()
+    script_directory = os.path.dirname(os.path.realpath(__file__))
+
+    def cert_pass():
+        while True:
+            if win:
+                response = input(f"Enter certificate password:")
+            if response:
+                return response
+            else:
+                print("No input. Please enter the password: ")
+
+    # Sign the executable using signtool
+    where_command = 'where /R "C:\\Program Files (x86)" signtool.*'
+    where_result = subprocess.run(where_command, capture_output=True, shell=True)
+    output_str = where_result.stdout.decode("utf-8")
+    output_lines = output_str.split("\r\n")
+
+    sdk_signtool = Path(r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\signtool.exe")
+    if sdk_signtool.is_file():
+        signtool_exe = str(sdk_signtool)
+    else:
+        signtool_exe = output_lines[0].strip()
+
+    # Construct the sign_command
+    try:
+        password = cert_pass()
+        main_sign_command = f'"{signtool_exe}" sign /f "{script_directory}\\cert\\certificate.pfx" /p {password} /tr http://timestamp.digicert.com /td sha256 /v "{exe_path}"'
+        print(f"Signing {exe_path}...")
+        subprocess.run(main_sign_command, shell=True)
+        print(f"{exe_path} signed!")
+
+    except Exception as e:
+        print("An error occurred while signing:", e)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -249,16 +284,16 @@ def main():
         print(f"  ✓ .rc built!")
 
     returncode = run_pyinstaller(label)
-    post_build_summary(label, count, success=(returncode == 0))
 
     if returncode == 0:
-        app_path = DIST_DIR / f"{APP}{EXT}"
+        app_path = (DIST_DIR / f"{APP}{EXT}").resolve()
 
-        if win:
-            renamed_app_path = DIST_DIR / f"{APP.replace(" ", "").replace("'","") if win else APP}{EXT}"
-            renamed_app_path.unlink(missing_ok=True)
-            app_path.rename(renamed_app_path)
+        renamed_app_path = (DIST_DIR / f"{APP.replace(" ", "").replace("'","") if win else APP}{EXT}").resolve()
+        renamed_app_path.unlink(missing_ok=True)
+        app_path.rename(renamed_app_path)
+        sign_executable(renamed_app_path)
 
+    post_build_summary(label, count, success=(returncode == 0), app_path=renamed_app_path)
     sys.exit(returncode)
 
 
