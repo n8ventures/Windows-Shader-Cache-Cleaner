@@ -15,37 +15,6 @@ _DEFAULTS = {
 # Collections where new named entries get seeded in over app versions,
 # without ever overwriting or reviving whatever the user's done with a
 # name they've already seen — see _seed_new_defaults().
-_SEEDABLE = ("custom_targets", "presets")
-
-
-def _seed_new_defaults(data: dict) -> tuple:
-    """Adds any default preset/custom-target the user has never seen
-    before (per _DEFAULTS above), without reviving one they deleted.
-
-    The tricky bit: "user deleted this preset" and "user has never had
-    this preset" both look identical in the data alone — an absent key.
-    So presence/absence of the *name* isn't enough; we track which names
-    have ever been seeded to this user in data["_seeded"], and only copy
-    a default in the first time its name shows up there. After that,
-    what happens to it is entirely the user's call, forever.
-
-    Returns (data, changed) — changed is True if this call added
-    anything, so the caller knows whether a save is worth doing.
-    """
-    changed = False
-    seeded = data.setdefault("_seeded", {})
-    for key in _SEEDABLE:
-        seeded_names = set(seeded.get(key, []))
-        bucket = data.setdefault(key, {})
-        for name, spec in _DEFAULTS.get(key, {}).items():
-            if name not in seeded_names:
-                bucket[name] = spec
-                seeded_names.add(name)
-                changed = True
-        if seeded.get(key) != sorted(seeded_names):
-            seeded[key] = sorted(seeded_names)
-            changed = True
-    return data, changed
 
 
 def load_config() -> dict:
@@ -66,9 +35,8 @@ def load_config() -> dict:
     # wholesale here — the fine-grained "add only what's new" merge for
     # those happens next, in _seed_new_defaults().
     merged = {**_DEFAULTS, **data}
-    merged, seeded_something = _seed_new_defaults(merged)
 
-    if is_first_run or seeded_something:
+    if is_first_run:
         save_config(merged)
     return merged
 
