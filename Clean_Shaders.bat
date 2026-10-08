@@ -113,8 +113,11 @@ call :AddCache "%LOCALAPPDATA%\Temp\D3DCache"                          "Direct3D
 
 call :AddCache "%LOCALAPPDATA%\AMD\DXCache"                            "AMD DX Cache"                           AMD
 call :AddCache "%LOCALAPPDATA%\AMD\DxcCache"                           "AMD DirectX Shader Compiler Cache"      AMD
+call :AddCache "%LOCALAPPDATA%\AMD\DX9Cache"                           "AMD DX9 Cache"                          AMD
 call :AddCache "%LOCALAPPDATA%\AMD\GLCache"                            "AMD OpenGL Cache"                       AMD
+call :AddCache "%LOCALAPPDATA%\AMD\OglCache"                           "AMD OpenGL Legacy Cache"                AMD
 call :AddCache "%LOCALAPPDATA%\AMD\VkCache"                            "AMD Vulkan Cache"                       AMD
+call :AddCache "%LOCALAPPDATA%\AMD\cl.cache"                           "AMD OpenCL Cache"                       AMD
 
 call :AddCache "%LOCALAPPDATA%\Temp\NVIDIA Corporation\NV_Cache"       "NVIDIA Pipeline Cache"                  NVIDIA
 call :AddCache "%LOCALAPPDATA%\NVIDIA\DXCache"                         "NVIDIA DX Cache"                        NVIDIA

@@ -179,8 +179,11 @@ def build_cache_list() -> list:
         CacheEntry("Direct3D Pipeline Cache", local / "Temp" / "D3DCache", "WIN"),
         CacheEntry("AMD DX Cache", local / "AMD" / "DXCache", "AMD"),
         CacheEntry("AMD DirectX Shader Compiler Cache", local / "AMD" / "DxcCache", "AMD"),
+        CacheEntry("AMD DX9 Cache", local / "AMD" / "DX9Cache", "AMD"),
         CacheEntry("AMD OpenGL Cache", local / "AMD" / "GLCache", "AMD"),
+        CacheEntry("AMD OpenGL Legacy Cache", local / "AMD" / "OglCache", "AMD"),
         CacheEntry("AMD Vulkan Cache", local / "AMD" / "VkCache", "AMD"),
+        CacheEntry("AMD OpenCL Cache", local / "AMD" / "cl.cache", "AMD"),
         CacheEntry("NVIDIA Pipeline Cache", local / "Temp" / "NVIDIA Corporation" / "NV_Cache", "NVIDIA"),
         CacheEntry("NVIDIA DX Cache", local / "NVIDIA" / "DXCache", "NVIDIA"),
         CacheEntry("NVIDIA OpenGL Cache", local / "NVIDIA" / "GLCache", "NVIDIA"),
@@ -204,6 +207,11 @@ def build_cache_list() -> list:
 def folder_size(path: Path) -> int:
     if not path.exists():
         return 0
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
     total = 0
     for root, _dirs, files in os.walk(path):
         for f in files:
@@ -228,7 +236,7 @@ def scan_all(entries: list, on_each: Optional[Callable[[CacheEntry], None]] = No
 
 
 def clear_entry(entry: CacheEntry) -> int:
-    """Deletes and recreates one cache folder. Returns bytes freed.
+    """Deletes and recreates one cache folder or file. Returns bytes freed.
     Sets entry.status to 'ok' (cleared), 'missing' (nothing there), or
     'locked' (something's holding a file open — matches the batch
     script's behavior of leaving it and moving on rather than failing
@@ -239,7 +247,13 @@ def clear_entry(entry: CacheEntry) -> int:
         return 0
 
     freed = entry.size_bytes if entry.size_bytes is not None else folder_size(entry.path)
-    shutil.rmtree(entry.path, ignore_errors=True)
+    try:
+        if entry.path.is_dir():
+            shutil.rmtree(entry.path, ignore_errors=True)
+        else:
+            entry.path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
     if entry.path.exists():
         entry.status = "locked"
@@ -247,7 +261,12 @@ def clear_entry(entry: CacheEntry) -> int:
         return 0
 
     try:
-        entry.path.mkdir(parents=True, exist_ok=True)
+        if entry.path.suffix:
+            # file-like cache entries are removed and left absent; keep a single
+            # file entry from reappearing as a folder when the cache was never a dir.
+            pass
+        else:
+            entry.path.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
     entry.status = "ok"
@@ -295,7 +314,7 @@ def find_untracked_siblings(entries: list) -> list:
             if not root.is_dir():
                 continue
             try:
-                children = [c for c in root.iterdir() if c.is_dir()]
+                children = [c for c in root.iterdir() if c.is_dir() or c.is_file()]
             except OSError:
                 continue
             for child in children:
