@@ -39,15 +39,15 @@ def set_icon(root):
     root.iconbitmap(icon)
 
 
-# icon_img = Image.open(icon_png).convert("RGBA")
-# icon_img = icon_img.resize((256, 256), Image.LANCZOS)
-# icon_img = icon_img.resize((64, 64), Image.LANCZOS)
+icon_img = Image.open(icon_png).convert("RGBA")
+icon_img = icon_img.resize((256, 256), Image.LANCZOS)
+icon_img = icon_img.resize((64, 64), Image.LANCZOS)
 
-# icon_ctkImage = ctk.CTkImage(
-#     light_image=icon_img,
-#     dark_image=icon_img,
-#     size=(64, 64),
-# )
+icon_ctkImage = ctk.CTkImage(
+    light_image=icon_img,
+    dark_image=icon_img,
+    size=(64, 64),
+)
 
 APP_NAME = __appname__
 
@@ -107,6 +107,7 @@ class ProgressPopup(ctk.CTkToplevel):
         self.resizable(False, False)
         self.protocol("WM_DELETE_WINDOW", lambda: None)  # blocking, on purpose — mid-delete isn't cancelable
         self.grab_set()
+        set_icon(self)
 
         self.total = max(total, 1)
         self.label_status = ctk.CTkLabel(self, text=f"0 / {total}", font=("", 14, "bold"))
@@ -137,6 +138,7 @@ class ManageSteamPathsPopup(ctk.CTkToplevel):
         self.geometry(f"{width}x{height}+{x}+{y - 35}")
         self.resizable(False, False)
         self.grab_set()
+        set_icon(self)
 
         ctk.CTkLabel(
             self,
@@ -209,12 +211,13 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.withdraw()
-        width, height = 620, 780
+        width, height = 620, 1020
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         x, y = (sw - width) // 2, (sh - height) // 2
         self.title(APP_NAME)
         self.geometry(f"{width}x{height}+{x}+{y - 35}")
         self.minsize(520, 600)
+        set_icon(self)
         self.update_idletasks()
 
         self.entries = []
@@ -241,8 +244,16 @@ class App(ctk.CTk):
             px=15,
         )
         self.theme_toggle_btn.place(relx=1.0, x=-14, y=14, anchor="ne")
-
-        ctk.CTkLabel(self, text=APP_NAME, font=("", 20, "bold")).pack(pady=(18, 4))
+        title = ctk.CTkLabel(
+            self,
+            text="",
+            image=icon_ctkImage,
+            compound="left",
+            font=("", 20, "bold"),
+        )
+        title.image = icon_ctkImage
+        title.pack(pady=(18, 4))
+        ctk.CTkLabel(self, text=f"  {APP_NAME.upper()}", font=("", 20, "bold")).pack(pady=(18, 4))
         ctk.CTkLabel(
             self,
             text="Clear stale GPU shader caches to fix stutter, glitches, or\ninstability after a driver update.",
@@ -266,9 +277,7 @@ class App(ctk.CTk):
         # row only fit at full width, forcing a resize to see the tail end.
         preset_container = ctk.CTkFrame(self, fg_color="transparent", border_width=0)
         preset_container.pack(fill="x", padx=20, pady=(0, 8))
-        ctk.CTkLabel(preset_container, text="Select:", font=("", 11), text_color="gray55").pack(
-            anchor="w", pady=(0, 4)
-        )
+        ctk.CTkLabel(preset_container, text="Select:", font=("", 11), text_color="gray55").pack(anchor="w", pady=(0, 4))
 
         preset_grid = ctk.CTkFrame(preset_container, fg_color="transparent", border_width=0)
         preset_grid.pack(fill="x")
